@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Openpay" Version="1.0.27" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\OneGoalDiscover_Helpers\OneGoalDiscover_Helpers\OneGoalDiscover_Helpers.csproj" />
+    <ProjectReference Include="..\..\OneGoalDiscover_Models\OneGoalDiscover_Models.csproj" />
+    <ProjectReference Include="..\..\OneGoalDiscover_Utilities\OneGoalDiscover_Utilities.csproj" />
+  </ItemGroup>
+
+</Project>
