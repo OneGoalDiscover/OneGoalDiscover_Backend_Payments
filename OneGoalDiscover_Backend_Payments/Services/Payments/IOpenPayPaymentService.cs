@@ -1,23 +1,11 @@
+using OneGoalDiscover_Models.DTOs.Payments;
+
 namespace OneGoalDiscover_Backend_Payments.Services.Payments;
-
-public record CreateChargeRequest(
-    string PlanId,
-    string PaymentMethod,   // "card" | "bank_account" | "store"
-    string? TokenId,         // para tarjeta: token generado por openpay.js
-    string CustomerName,
-    string CustomerEmail,
-    string CustomerPhone,
-    string? Rfc,
-    string? Description);
-
-public record ChargeResult(
-    string OrderId,
-    string Status,
-    string? PaymentBarcode,     // OXXO
-    string? PaymentClabe,       // SPEI
-    string? PaymentReference);
 
 public interface IOpenPayPaymentService
 {
-    Task<ChargeResult> CreateChargeAsync(CreateChargeRequest request, CancellationToken ct = default);
+    Task<CreateChargeResponseDTO> CreateChargeAsync(string cfg, short idCompany, CreateChargeRequestDTO request, CancellationToken ct = default);
+    Task UpdateStatusAsync(string cfg, string dbName, string orderId, string estatus, string? chargeId = null, string? referencia = null, CancellationToken ct = default);
+    Task<(string InstalacionId, int EmpAdm, int EmpTotal, int DuracionMeses, int MesesGratis, string NombreBd)?> FindForExtendAsync(string cfg, string dbName, string orderId, CancellationToken ct = default);
+    Task<OneGoalDiscover_Models.DTOs.Payments.PaymentStatusDTO?> GetLatestPaymentStatusAsync(string cfg, short idCompany, string instalacionId, CancellationToken ct = default);
 }

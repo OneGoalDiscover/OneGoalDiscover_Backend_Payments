@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
-using OneGoalDiscover_Backend_Payments.Middlewares;
 using OneGoalDiscover_Backend_Payments.Services;
 using OneGoalDiscover_Helpers.Auth;
 using OneGoalDiscover_Models.DTOs.Auth;

@@ -5,7 +5,7 @@ namespace OneGoalDiscover_Backend_Payments.Services.Infrastructure;
 
 public class LicensingClient(HttpClient httpClient, IConfiguration configuration) : ILicensingClient
 {
-    public async Task ExtendLicenseAsync(string installationId, int days, string paymentReference, CancellationToken ct = default)
+    public async Task ExtendLicenseAsync(string installationId, int durationMonths, int empAdm, int empTotal, string paymentOrderId, CancellationToken ct = default)
     {
         string internalKey = configuration["InternalKeys:LicensingService"] ?? string.Empty;
         httpClient.DefaultRequestHeaders.Remove("X-Internal-Key");
@@ -14,7 +14,7 @@ public class LicensingClient(HttpClient httpClient, IConfiguration configuration
 
         var response = await httpClient.PostAsJsonAsync(
             $"api/licenses/{installationId}/extend",
-            new { Days = days, PaymentReference = paymentReference },
+            new { DurationMonths = durationMonths, EmpAdm = empAdm, EmpTotal = empTotal, PaymentOrderId = paymentOrderId },
             ct);
 
         if (!response.IsSuccessStatusCode)
