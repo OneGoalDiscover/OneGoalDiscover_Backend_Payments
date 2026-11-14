@@ -26,15 +26,25 @@ public class PaymentsController(IOpenPayPaymentService paymentService) : Control
         return Ok(result);
     }
 
-    // Devuelve el último pago pendiente o completado de la instalación del usuario.
-    // Usado por el wizard al montar el paso de confirmación para restaurar estado.
-    [HttpGet("status/installation/{instalacionId}")]
-    public async Task<IActionResult> GetInstallationPaymentStatus(string instalacionId, CancellationToken ct)
+    // Devuelve MerchantId y PublicKey de OpenPay para que el frontend inicialice openpay.js.
+    // No requiere autenticación: estas claves son públicas por diseño de OpenPay.
+    [HttpGet("openpay-config")]
+    [AllowAnonymous]
+    public IActionResult GetOpenPayConfig()
+    {
+        var config = paymentService.GetPublicConfig();
+        return Ok(config);
+    }
+
+    // Devuelve el último pago pendiente de la empresa autenticada.
+    // La instalacion_id se deriva de tDSV_SIS_Licencia en el backend; no se pasa por URL.
+    [HttpGet("status/pending")]
+    public async Task<IActionResult> GetPendingPaymentStatus(CancellationToken ct)
     {
         var token    = Request.Headers["Authorization"].ToString().Replace("Bearer ", "");
         JwtInformationTokenDTO jwtInfo = JwtToken.jwtInformation(token);
 
-        var result = await paymentService.GetLatestPaymentStatusAsync(jwtInfo.cfg, jwtInfo.idCompany, instalacionId, ct);
+        var result = await paymentService.GetLatestPaymentStatusAsync(jwtInfo.cfg, jwtInfo.idCompany, ct);
         if (result is null) return NoContent();
         return Ok(result);
     }

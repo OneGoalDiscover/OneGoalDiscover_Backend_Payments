@@ -1,8 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using OneGoalDiscover_Backend_Payments.Services.Infrastructure;
 using OneGoalDiscover_Backend_Payments.Services.Payments;
-using OneGoalDiscover_Backend_Payments.Services;
 using OneGoalDiscover_Models.DTOs.Payments;
 using System.Text.Json;
 
@@ -13,8 +11,6 @@ namespace OneGoalDiscover_Backend_Payments.Controllers.Payments;
 [AllowAnonymous]   // OpenPay no envía JWT; autenticidad verificada por token del dashboard
 public class WebhookController(
     IOpenPayPaymentService paymentService,
-    ILicensingClient licensingClient,
-    IHubsClient hubsClient,
     IConfiguration configuration,
     ILogger<WebhookController> logger) : ControllerBase
 {
@@ -92,37 +88,12 @@ public class WebhookController(
 
     private async Task HandleChargeSucceededAsync(string cfg, string dbName, OpenPayTransactionDTO tx, CancellationToken ct)
     {
-        await paymentService.UpdateStatusAsync(cfg, dbName, tx.OrderId, "completado", tx.Id, ct: ct);
-
-        var info = await paymentService.FindForExtendAsync(cfg, dbName, tx.OrderId, ct);
-        if (info is null)
+        bool updated = await paymentService.UpdateStatusAsync(cfg, dbName, tx.OrderId, "completado", tx.Id, ct: ct);
+        if (!updated)
         {
-            logger.LogWarning("Webhook: pago no encontrado en BD para orderId={OrderId}.", tx.OrderId);
+            logger.LogInformation("Webhook charge.succeeded ignorado: orderId={OrderId} ya estaba completado.", tx.OrderId);
             return;
         }
-
-        int duracionTotal = info.Value.DuracionMeses + info.Value.MesesGratis;
-
-        try
-        {
-            await licensingClient.ExtendLicenseAsync(
-                info.Value.InstalacionId,
-                duracionTotal,
-                info.Value.EmpAdm,
-                info.Value.EmpTotal,
-                tx.OrderId,
-                ct);
-
-            logger.LogInformation(
-                "Licencia extendida: instalacion={Id} meses={Meses} bd={Bd}",
-                info.Value.InstalacionId, duracionTotal, info.Value.NombreBd);
-
-            await hubsClient.BroadcastLicenseUpdatedAsync(cfg, ct);
-        }
-        catch (Exception ex)
-        {
-            // Log pero no fallar el webhook — el pago ya se confirmó; la extensión se puede reintentar
-            logger.LogError(ex, "Webhook: error al extender licencia para instalación {Id}.", info.Value.InstalacionId);
-        }
+        await paymentService.ExtendLicenseFromPaymentAsync(cfg, dbName, tx.OrderId, tx.Id, ct);
     }
 }

@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Data.SqlClient;
 using OneGoalDiscover_Backend_Payments.Exceptions;
+using OneGoalDiscover_Backend_Payments.Services.Infrastructure;
 using OneGoalDiscover_Backend_Payments.Services.Plans;
 using OneGoalDiscover_Helpers.System;
 using OneGoalDiscover_Models.DTOs.Payments;
@@ -14,7 +15,10 @@ namespace OneGoalDiscover_Backend_Payments.Services.Payments;
 public class OpenPayPaymentService(
     IDatabaseConnectionUtility db,
     IPlansService plansService,
-    IConfiguration configuration) : IOpenPayPaymentService
+    IConfiguration configuration,
+    ILicensingClient licensingClient,
+    IHubsClient hubsClient,
+    ILogger<OpenPayPaymentService> logger) : IOpenPayPaymentService
 {
     private readonly DatabaseHelper    _dbHelper = new(db);
     private readonly OpenPaySDK.OpenpayAPI _api  = CreateApi(configuration);
@@ -111,14 +115,25 @@ public class OpenPayPaymentService(
                 "oxxo" => charge.PaymentMethod?.Reference,
                 _      => null
             };
-            await UpdateStatusAsync(cfg, dbName, orderId, "pendiente", charge.Id, referencia, ct: ct);
+
+            // Tarjeta: OpenPay completa el cobro síncronamente — status llega "completed" de inmediato.
+            // SPEI/OXXO quedan en "pendiente" hasta que el cliente paga (webhook posterior).
+            bool cardCompleted = request.MetodoPago.Equals("card", StringComparison.OrdinalIgnoreCase)
+                                 && string.Equals(charge.Status, "completed", StringComparison.OrdinalIgnoreCase);
+            string estatusInicial = cardCompleted ? "completado" : "pendiente";
+
+            await UpdateStatusAsync(cfg, dbName, orderId, estatusInicial, charge.Id, referencia, ct: ct);
+
+            if (cardCompleted)
+                await ExtendLicenseFromPaymentAsync(cfg, dbName, orderId, charge.Id, ct);
 
             var response = new CreateChargeResponseDTO
             {
-                IdPago         = idPago,
-                OpenpayOrderId = orderId,
-                Estatus        = "pendiente",
-                Monto          = monto
+                IdPago          = idPago,
+                OpenpayOrderId  = orderId,
+                OpenpayChargeId = charge.Id,
+                Estatus         = estatusInicial,
+                Monto           = monto
             };
 
             // ponytail: propiedades de PaymentMethod verificar contra la versión del SDK Openpay 1.0.27
@@ -141,8 +156,9 @@ public class OpenPayPaymentService(
         }
     }
 
-    // Conexión via dbName — para webhook (no hay JWT ni idCompany)
-    public async Task UpdateStatusAsync(string cfg, string dbName, string orderId, string estatus, string? chargeId = null, string? referencia = null, CancellationToken ct = default)
+    // Conexión via dbName — para webhook (no hay JWT ni idCompany).
+    // Retorna true si el registro fue actualizado; false si ya estaba 'completado' (guard idempotente).
+    public async Task<bool> UpdateStatusAsync(string cfg, string dbName, string orderId, string estatus, string? chargeId = null, string? referencia = null, CancellationToken ct = default)
     {
         await _dbHelper.configureConnections(configuration["CFGsPath"]!, cfg);
 
@@ -154,9 +170,12 @@ public class OpenPayPaymentService(
         p.Add("@estatus",           estatus);
         p.Add("@openpay_charge_id", chargeId,   dbType: DbType.String);
         p.Add("@referencia_pago",   referencia, dbType: DbType.String);
+        p.Add("@rows_affected",     dbType: DbType.Int32, direction: ParameterDirection.Output);
 
         await using var conn = new SqlConnection(csb.ConnectionString);
         await conn.ExecuteAsync("pDSV_LIC_PagoActualizarEstatus", p, commandType: CommandType.StoredProcedure);
+
+        return p.Get<int>("@rows_affected") > 0;
     }
 
     public async Task<(string InstalacionId, int EmpAdm, int EmpTotal, int DuracionMeses, int MesesGratis, string NombreBd)?> FindForExtendAsync(string cfg, string dbName, string orderId, CancellationToken ct = default)
@@ -194,26 +213,83 @@ public class OpenPayPaymentService(
     }
 
     public async Task<OneGoalDiscover_Models.DTOs.Payments.PaymentStatusDTO?> GetLatestPaymentStatusAsync(
-        string cfg, short idCompany, string instalacionId, CancellationToken ct = default)
+        string cfg, short idCompany, CancellationToken ct = default)
     {
         await _dbHelper.configureConnections(configuration["CFGsPath"]!, cfg, idCompany);
         await using var conn = new SqlConnection(db.getConnectionStringBuilder().ConnectionString);
+
+        string instalacionId = await conn.ExecuteScalarAsync<string>(
+            "SELECT CONVERT(VARCHAR(100), id_instalacion) FROM tDSV_SIS_Licencia") ?? string.Empty;
+
+        // Si hay instalacion_id, filtramos por ella; si no (sandbox / entorno nuevo), traemos el
+        // último pago pendiente de la empresa — el aislamiento ya lo da la conexión por empresa.
+        string sql = string.IsNullOrEmpty(instalacionId)
+            ? @"SELECT TOP 1
+                    id_pago                                    AS IdPago,
+                    CONVERT(VARCHAR(100), instalacion_id)      AS InstalacionId,
+                    openpay_order_id                           AS OpenpayOrderId,
+                    openpay_charge_id                          AS OpenpayChargeId,
+                    estatus                                    AS Estatus,
+                    monto                                      AS Monto,
+                    metodo_pago                                AS MetodoPago,
+                    referencia_pago                            AS ReferenciaPago,
+                    created_at                                 AS CreatedAt,
+                    updated_at                                 AS UpdatedAt
+                  FROM tDSV_LIC_Pagos
+                  WHERE estatus = 'pendiente'
+                  ORDER BY created_at DESC"
+            : @"SELECT TOP 1
+                    id_pago                                    AS IdPago,
+                    CONVERT(VARCHAR(100), instalacion_id)      AS InstalacionId,
+                    openpay_order_id                           AS OpenpayOrderId,
+                    openpay_charge_id                          AS OpenpayChargeId,
+                    estatus                                    AS Estatus,
+                    monto                                      AS Monto,
+                    metodo_pago                                AS MetodoPago,
+                    referencia_pago                            AS ReferenciaPago,
+                    created_at                                 AS CreatedAt,
+                    updated_at                                 AS UpdatedAt
+                  FROM tDSV_LIC_Pagos
+                  WHERE CONVERT(VARCHAR(100), instalacion_id) = @instalacion_id
+                    AND estatus = 'pendiente'
+                  ORDER BY created_at DESC";
+
         return await conn.QueryFirstOrDefaultAsync<OneGoalDiscover_Models.DTOs.Payments.PaymentStatusDTO>(
-            @"SELECT TOP 1
-                id_pago                                    AS IdPago,
-                CONVERT(VARCHAR(100), instalacion_id)      AS InstalacionId,
-                openpay_order_id                           AS OpenpayOrderId,
-                estatus                                    AS Estatus,
-                monto                                      AS Monto,
-                metodo_pago                                AS MetodoPago,
-                referencia_pago                            AS ReferenciaPago,
-                created_at                                 AS CreatedAt,
-                updated_at                                 AS UpdatedAt
-              FROM tDSV_LIC_Pagos
-              WHERE CONVERT(VARCHAR(100), instalacion_id) = @instalacion_id
-                AND estatus = 'pendiente'
-              ORDER BY created_at DESC",
-            new { instalacion_id = instalacionId });
+            sql, new { instalacion_id = instalacionId });
+    }
+
+    public OpenPayPublicConfigDTO GetPublicConfig() => new()
+    {
+        MerchantId     = configuration["OpenPay:MerchantId"]  ?? string.Empty,
+        PublicKey      = configuration["OpenPay:PublicKey"]   ?? string.Empty,
+        ProductionMode = configuration.GetValue<bool>("OpenPay:ProductionMode")
+    };
+
+    // Extiende la licencia tras confirmar un pago — mismo flujo que el webhook charge.succeeded.
+    public async Task ExtendLicenseFromPaymentAsync(string cfg, string dbName, string orderId, string chargeId, CancellationToken ct = default)
+    {
+        var info = await FindForExtendAsync(cfg, dbName, orderId, ct);
+        if (info is null)
+        {
+            logger.LogWarning("ExtendLicense: pago no encontrado en BD para orderId={OrderId}.", orderId);
+            return;
+        }
+
+        int duracionTotal = info.Value.DuracionMeses + info.Value.MesesGratis;
+        try
+        {
+            await licensingClient.ExtendLicenseAsync(
+                info.Value.InstalacionId, duracionTotal,
+                info.Value.EmpAdm, info.Value.EmpTotal, orderId, ct);
+            logger.LogInformation(
+                "Licencia extendida (tarjeta síncrono): instalacion={Id} meses={Meses} bd={Db}",
+                info.Value.InstalacionId, duracionTotal, info.Value.NombreBd);
+            await hubsClient.BroadcastLicenseUpdatedAsync(cfg, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error al extender licencia post-pago tarjeta orderId={OrderId}.", orderId);
+        }
     }
 
     private static string MapMethod(string method) => method.ToLowerInvariant() switch
