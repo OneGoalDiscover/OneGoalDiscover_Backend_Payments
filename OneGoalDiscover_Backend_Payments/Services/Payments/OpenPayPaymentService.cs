@@ -102,6 +102,8 @@ public class OpenPayPaymentService(
             {
                 chargeReq.SourceId        = request.TokenId;
                 chargeReq.DeviceSessionId = request.DeviceSessionId;
+                if (!string.IsNullOrEmpty(request.RedirectUrl))
+                    chargeReq.RedirectUrl = request.RedirectUrl;
             }
 
             var charge = await Task.Run(() => _api.ChargeService.Create(chargeReq), ct);
@@ -116,9 +118,13 @@ public class OpenPayPaymentService(
                 _      => null
             };
 
+            // Tarjeta 3DS: banco requiere autenticación del usuario → redirect, no completado aún.
+            bool isRedirect   = string.Equals(charge.PaymentMethod?.Type, "redirect", StringComparison.OrdinalIgnoreCase);
+
             // Tarjeta: OpenPay completa el cobro síncronamente — status llega "completed" de inmediato.
             // SPEI/OXXO quedan en "pendiente" hasta que el cliente paga (webhook posterior).
             bool cardCompleted = request.MetodoPago.Equals("card", StringComparison.OrdinalIgnoreCase)
+                                 && !isRedirect
                                  && string.Equals(charge.Status, "completed", StringComparison.OrdinalIgnoreCase);
             string estatusInicial = cardCompleted ? "completado" : "pendiente";
 
@@ -144,6 +150,8 @@ public class OpenPayPaymentService(
                 response.CodigoBarras          = charge.PaymentMethod.Reference;
                 response.UrlBarcode            = charge.PaymentMethod.BarcodeURL;
                 response.VencimientoReferencia = charge.DueDate;
+                if (isRedirect)
+                    response.RedirectUrl       = charge.PaymentMethod.Url;
             }
 
             return response;
