@@ -12,14 +12,26 @@ public class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandling
         {
             await next(context);
         }
-        catch (PaymentException ex)
+        catch (PaymentValidationException ex)
         {
-            context.Response.StatusCode = (int)HttpStatusCode.Conflict;
+            context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
             context.Response.ContentType = "application/problem+json";
             await context.Response.WriteAsJsonAsync(new ProblemDetails
             {
-                Status = (int)HttpStatusCode.Conflict,
-                Title = "Error de pago",
+                Status = (int)HttpStatusCode.BadRequest,
+                Title = "Datos de pago no válidos",
+                Detail = ex.Message
+            });
+        }
+        catch (PaymentException ex)
+        {
+            // Regla de negocio no satisfecha (cargo rechazado, plan inexistente, intento anterior ya no vigente...): 422, no 409.
+            context.Response.StatusCode = (int)HttpStatusCode.UnprocessableEntity;
+            context.Response.ContentType = "application/problem+json";
+            await context.Response.WriteAsJsonAsync(new ProblemDetails
+            {
+                Status = (int)HttpStatusCode.UnprocessableEntity,
+                Title = "Pago no procesado",
                 Detail = ex.Message
             });
         }
