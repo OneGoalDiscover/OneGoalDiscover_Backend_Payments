@@ -353,7 +353,6 @@ public class OpenPayPaymentService(
     // Límite de OpenPay para el nombre y el correo del cliente
     private const int MaxCustomerFieldLength = 100;
     private static readonly HashSet<string> SupportedMethods = ["card", "spei", "oxxo"];
-    private static readonly Regex RfcRegex = new(@"^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // Valida lo que el servidor no debe aceptar del cliente. Normaliza MetodoPago a minúsculas.
     private static void ValidateRequest(CreateChargeRequestDTO request)
@@ -394,17 +393,6 @@ public class OpenPayPaymentService(
 
         if (!IsValidEmail(datos!.Email))
             throw new PaymentValidationException("El correo electrónico no es válido.");
-
-        // Datos mínimos para facturar (CFDI): RFC y código postal fiscal. El domicilio es opcional.
-        string rfc = datos.Rfc?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (!RfcRegex.IsMatch(rfc))
-            throw new PaymentValidationException("El RFC no es válido. Debe tener 12 caracteres (persona moral) o 13 (persona física).");
-        datos.Rfc = rfc;
-
-        string postalCode = datos.CodigoPostal?.Trim() ?? string.Empty;
-        if (postalCode.Length != 5 || !postalCode.All(char.IsAsciiDigit))
-            throw new PaymentValidationException("El código postal fiscal debe tener 5 dígitos.");
-        datos.CodigoPostal = postalCode;
 
         if (new[] { datos.Calle, datos.Ciudad, datos.Estado }.Any(v => (v?.Trim().Length ?? 0) > MaxCustomerFieldLength))
             throw new PaymentValidationException($"Calle, ciudad y estado no pueden exceder {MaxCustomerFieldLength} caracteres.");

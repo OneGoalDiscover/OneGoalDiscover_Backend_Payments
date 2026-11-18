@@ -20,10 +20,29 @@ public class Program
         builder.Services.AddApplicationServices(builder.Configuration);
 
         JwtTokenParameter jwtParams = new JwtToken().tokenValidationParameters();
-        builder.Services.AddAuthentication(opt =>
+        // El token de renovación (login con licencia vencida, sin sesión) solo se acepta si hay clave de firma configurada.
+        // Un esquema "selector" elige por la audiencia del token entre el de sesión y el de renovación, de modo que
+        // HttpContext.User queda poblado con cualquiera de los dos (lo usa el rate limiting) y no hay que repetir [Authorize(Schemes=...)].
+        string? renewalKey = builder.Configuration[RenewalToken.ConfigKeySigningKey];
+        bool renewalEnabled = RenewalToken.IsConfigured(renewalKey);
+        const string SelectorScheme = "SessionOrRenewal";
+
+        var authentication = builder.Services.AddAuthentication(opt =>
         {
-            opt.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-            opt.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            opt.DefaultAuthenticateScheme = SelectorScheme;
+            opt.DefaultChallengeScheme = SelectorScheme;
+        })
+        .AddPolicyScheme(SelectorScheme, SelectorScheme, opt =>
+        {
+            opt.ForwardDefaultSelector = context =>
+            {
+                string? bearer = context.Request.Headers.Authorization.ToString() is { Length: > 7 } header
+                                 && header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                    ? header[7..].Trim() : null;
+                return renewalEnabled && RenewalToken.LooksLikeRenewalToken(bearer)
+                    ? RenewalToken.SchemeName
+                    : JwtBearerDefaults.AuthenticationScheme;
+            };
         })
         .AddJwtBearer(opt =>
         {
@@ -40,6 +59,25 @@ public class Program
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtParams.secretKey))
             };
         });
+
+        if (renewalEnabled)
+        {
+            authentication.AddJwtBearer(RenewalToken.SchemeName, opt =>
+            {
+                opt.RequireHttpsMetadata = true;
+                opt.TokenValidationParameters = RenewalToken.CreateValidationParameters(renewalKey!);
+                opt.Events = new JwtBearerEvents
+                {
+                    // Defensa adicional: además de firma y audiencia propias, el token debe traer el alcance de renovación
+                    OnTokenValidated = context =>
+                    {
+                        if (context.Principal?.FindFirst(RenewalToken.ScopeClaim)?.Value != RenewalToken.ScopeValue)
+                            context.Fail("El token no tiene el alcance de renovación de licencia.");
+                        return Task.CompletedTask;
+                    }
+                };
+            });
+        }
 
         builder.Services.AddAuthorization();
 
