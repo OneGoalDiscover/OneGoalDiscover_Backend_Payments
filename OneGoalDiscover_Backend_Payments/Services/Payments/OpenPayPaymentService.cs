@@ -86,9 +86,11 @@ public class OpenPayPaymentService(
             ? ResolveThreeDSecureReturnUrl(request.RedirectUrl, required: Use3DSecure)
             : null;
 
-        await using var conn = new SqlConnection(db.getConnectionStringBuilder().ConnectionString);
+        // tDSV_SIS_Licencia, tDSV_LIC_Pagos y pDSV_LIC_PagoGuardar viven en la DB consolidada (MCP).
+        await using var conn = new SqlConnection(db.getConnectionStringBuilder(useConsolidationDatabase: true).ConnectionString);
+
         string instalacionId = await conn.ExecuteScalarAsync<string>(
-            "SELECT CONVERT(VARCHAR(100), id_instalacion) FROM tDSV_SIS_Licencia") ?? string.Empty;
+            "SELECT TOP 1 CONVERT(VARCHAR(100), id_instalacion) FROM dsv.tDSV_SIS_Licencia") ?? string.Empty;
 
         // Sin instalación válida no hay licencia que extender: se rechaza ANTES de registrar el pago o cobrar.
         if (!Guid.TryParse(instalacionId, out _))
@@ -112,7 +114,7 @@ public class OpenPayPaymentService(
         spParams.Add("@idempotency_key",     request.IdempotencyKey, dbType: DbType.String, size: 64);
         spParams.Add("@ya_existia",          dbType: DbType.Boolean, direction: ParameterDirection.Output);
 
-        await conn.ExecuteAsync("pDSV_LIC_PagoGuardar", spParams, commandType: CommandType.StoredProcedure);
+        await conn.ExecuteAsync("dsv.pDSV_LIC_PagoGuardar", spParams, commandType: CommandType.StoredProcedure);
 
         int    idPago  = spParams.Get<int>("@id_pago");
         string orderId = spParams.Get<string>("@openpay_order_id");
@@ -130,6 +132,7 @@ public class OpenPayPaymentService(
                 Currency    = "MXN",
                 Description = $"Licencia OneGoalDiscover – {plan.Nombre}",
                 OrderId     = orderId,
+                SendEmail   = true,
                 Customer    = new OpenPaySDK.Entities.Customer
                 {
                     Name        = request.DatosFiscales.RazonSocial,
@@ -429,7 +432,7 @@ public class OpenPayPaymentService(
         p.Add("@rows_affected",     dbType: DbType.Int32, direction: ParameterDirection.Output);
 
         await using var conn = new SqlConnection(csb.ConnectionString);
-        await conn.ExecuteAsync("pDSV_LIC_PagoActualizarEstatus", p, commandType: CommandType.StoredProcedure);
+        await conn.ExecuteAsync("dsv.pDSV_LIC_PagoActualizarEstatus", p, commandType: CommandType.StoredProcedure);
 
         return p.Get<int>("@rows_affected") > 0;
     }
@@ -444,7 +447,7 @@ public class OpenPayPaymentService(
         {
             await using var conn = await CreateConnectionAsync(cfg, dbName);
             instalacionId = await conn.ExecuteScalarAsync<string>(
-                "SELECT CONVERT(VARCHAR(100), id_instalacion) FROM tDSV_SIS_Licencia") ?? string.Empty;
+                "SELECT CONVERT(VARCHAR(100), id_instalacion) FROM dsv.tDSV_SIS_Licencia") ?? string.Empty;
         }
 
         return (instalacionId, row.emp_adm, row.emp_total, row.duracion_meses, row.meses_gratis, row.nombre_bd);
@@ -502,7 +505,7 @@ public class OpenPayPaymentService(
         p.Add("@openpay_order_id", orderId);
 
         return (await conn.QueryAsync<PagoExtendRow>(
-            "pDSV_LIC_PagoObtenerPorOrden", p, commandType: CommandType.StoredProcedure)).FirstOrDefault();
+            "dsv.pDSV_LIC_PagoObtenerPorOrden", p, commandType: CommandType.StoredProcedure)).FirstOrDefault();
     }
 
     // orderId = "{cfg}-{dbname}-OGD{timestamp}{hex}"
@@ -560,7 +563,8 @@ public class OpenPayPaymentService(
     // Sin orderId: el último pago pendiente de la empresa. Con orderId: ese pago, en cualquier estatus.
     private async Task<PendingPaymentRow?> QueryPaymentAsync(string? orderId = null)
     {
-        await using var conn = new SqlConnection(db.getConnectionStringBuilder().ConnectionString);
+        // tDSV_LIC_Pagos vive en la DB consolidada (MCP), igual que tDSV_SIS_Licencia.
+        await using var conn = new SqlConnection(db.getConnectionStringBuilder(useConsolidationDatabase: true).ConnectionString);
 
         string instalacionId = string.Empty;
         string filter;
@@ -571,7 +575,7 @@ public class OpenPayPaymentService(
         else
         {
             instalacionId = await conn.ExecuteScalarAsync<string>(
-                "SELECT CONVERT(VARCHAR(100), id_instalacion) FROM tDSV_SIS_Licencia") ?? string.Empty;
+                "SELECT TOP 1 CONVERT(VARCHAR(100), id_instalacion) FROM dsv.tDSV_SIS_Licencia") ?? string.Empty;
 
             // Con instalacion_id se filtra por ella; si no hay (sandbox / entorno nuevo) se toma el último pendiente de la empresa:
             // el aislamiento ya lo da la conexión por empresa.
@@ -595,7 +599,7 @@ public class OpenPayPaymentService(
                             emp_adm                               AS EmpAdm,
                             emp_total                             AS EmpTotal,
                             datos_fiscales_json                   AS DatosFiscalesJson
-                        FROM tDSV_LIC_Pagos
+                        FROM dsv.tDSV_LIC_Pagos
                         WHERE {filter}
                         ORDER BY created_at DESC";
 
@@ -740,7 +744,7 @@ public class OpenPayPaymentService(
         p.Add("@openpay_order_id", orderId);
         p.Add("@rows_affected",    dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-        await conn.ExecuteAsync("pDSV_LIC_PagoReclamarLicencia", p, commandType: CommandType.StoredProcedure);
+        await conn.ExecuteAsync("dsv.pDSV_LIC_PagoReclamarLicencia", p, commandType: CommandType.StoredProcedure);
         return p.Get<int>("@rows_affected") > 0;
     }
 
@@ -753,7 +757,7 @@ public class OpenPayPaymentService(
         p.Add("@aplicada",         applied);
         p.Add("@error",            error, dbType: DbType.String);
 
-        await conn.ExecuteAsync("pDSV_LIC_PagoRegistrarLicencia", p, commandType: CommandType.StoredProcedure);
+        await conn.ExecuteAsync("dsv.pDSV_LIC_PagoRegistrarLicencia", p, commandType: CommandType.StoredProcedure);
     }
 
     private async Task<SqlConnection> CreateConnectionAsync(string cfg, string dbName)

@@ -13,12 +13,14 @@ public class PlansService(IDatabaseConnectionUtility db, IConfiguration configur
 
     public async Task<List<PlanDTO>> GetActivePlansAsync(string cfg, short idCompany, CancellationToken ct = default)
     {
-        await _dbHelper.configureConnections(configuration["CFGsPath"]!, cfg, idCompany);
+        // tDSV_LIC_Planes, tDSV_LIC_TarifasPlan y tDSV_LIC_Promociones viven en la DB consolidada (MCP),
+        // igual que el resto de las tablas de licenciamiento. idCompany no se usa aquí.
+        await _dbHelper.configureConnections(configuration["CFGsPath"]!, cfg);
 
-        await using var conn = new SqlConnection(db.getConnectionStringBuilder().ConnectionString);
+        await using var conn = new SqlConnection(db.getConnectionStringBuilder(useConsolidationDatabase: true).ConnectionString);
 
         using var multi = await conn.QueryMultipleAsync(
-            "pDSV_LIC_PlanListar", commandType: CommandType.StoredProcedure);
+            "dsv.pDSV_LIC_PlanListar", commandType: CommandType.StoredProcedure);
 
         var planRows   = (await multi.ReadAsync<PlanRow>()).ToList();
         var tarifaRows = (await multi.ReadAsync<TarifaRow>()).ToList();
