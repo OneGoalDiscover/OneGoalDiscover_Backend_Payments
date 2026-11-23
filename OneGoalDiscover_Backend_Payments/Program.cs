@@ -86,17 +86,7 @@ public class Program
         builder.Services.AddCors(options =>
         {
             options.AddDefaultPolicy(policy =>
-            {
-                if (builder.Environment.IsDevelopment())
-                    policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-                else
-                {
-                    string[] origins = builder.Configuration
-                        .GetSection("AllowedOrigins").Get<string[]>() ?? [];
-                    if (origins.Length > 0)
-                        policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
-                }
-            });
+                policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
         });
 
         AddPaymentsRateLimiting(builder);
