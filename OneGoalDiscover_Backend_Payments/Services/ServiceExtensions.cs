@@ -1,4 +1,5 @@
 using OneGoalDiscover_Backend_Payments.Middlewares;
+using OneGoalDiscover_Backend_Payments.Services.Billing;
 using OneGoalDiscover_Backend_Payments.Services.Infrastructure;
 using OneGoalDiscover_Backend_Payments.Services.Payments;
 using OneGoalDiscover_Backend_Payments.Services.Plans;
@@ -17,6 +18,7 @@ public static class ServiceExtensions
 
         services.AddScoped<IPlansService, PlansService>();
         services.AddScoped<IOpenPayPaymentService, OpenPayPaymentService>();
+        services.AddScoped<IBillingService, BillingService>();
 
         services.AddHttpClient<ILicensingClient, LicensingClient>(client =>
         {

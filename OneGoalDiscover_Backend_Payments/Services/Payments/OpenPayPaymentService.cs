@@ -184,7 +184,7 @@ public class OpenPayPaymentService(
                                  && string.Equals(charge.Status, "completed", StringComparison.OrdinalIgnoreCase);
             string estatusInicial = cardCompleted ? "completado" : "pendiente";
 
-            await UpdateStatusAsync(cfg, dbName, orderId, estatusInicial, charge.Id, referencia, ct: ct);
+            await UpdateStatusAsync(cfg, dbName, orderId, estatusInicial, charge.Id, referencia, charge.DueDate, ct: ct);
 
             // Idempotente: si el webhook ya extendió la licencia, el reclamo en BD evita extenderla otra vez.
             // Si falla, el pago queda completado con la licencia pendiente y el webhook (o conciliación) la reintenta.
@@ -415,7 +415,7 @@ public class OpenPayPaymentService(
 
     // Conexión via dbName — para webhook (no hay JWT ni idCompany).
     // Retorna true si el registro fue actualizado; false si ya estaba 'completado' (guard idempotente).
-    public async Task<bool> UpdateStatusAsync(string cfg, string dbName, string orderId, string estatus, string? chargeId = null, string? referencia = null, bool restore = false, CancellationToken ct = default)
+    public async Task<bool> UpdateStatusAsync(string cfg, string dbName, string orderId, string estatus, string? chargeId = null, string? referencia = null, DateTime? fechaVencimiento = null, bool restore = false, CancellationToken ct = default)
     {
         await _dbHelper.configureConnections(configuration["CFGsPath"]!, cfg);
 
@@ -426,7 +426,8 @@ public class OpenPayPaymentService(
         p.Add("@openpay_order_id",  orderId);
         p.Add("@estatus",           estatus);
         p.Add("@openpay_charge_id", chargeId,   dbType: DbType.String);
-        p.Add("@referencia_pago",   referencia, dbType: DbType.String);
+        p.Add("@referencia_pago",       referencia,       dbType: DbType.String);
+        p.Add("@fecha_vencimiento_ref", fechaVencimiento, dbType: DbType.DateTime2);
         if (restore)
             p.Add("@restaurar", true);   // solo se envía cuando hace falta: así el SP anterior sigue funcionando
         p.Add("@rows_affected",     dbType: DbType.Int32, direction: ParameterDirection.Output);
