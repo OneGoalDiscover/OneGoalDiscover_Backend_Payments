@@ -43,19 +43,4 @@ public class BillingService(
             commandType: CommandType.StoredProcedure);
     }
 
-    public async Task<BillingPaymentDetailDTO?> GetPaymentDetailAsync(
-        string cfg, short idCompany, int idPago, CancellationToken ct = default)
-    {
-        await _dbHelper.configureConnections(configuration["CFGsPath"]!, cfg, idCompany);
-
-        await using var conn = new SqlConnection(db.getConnectionStringBuilder(useConsolidationDatabase: true).ConnectionString);
-
-        var p = new DynamicParameters();
-        p.Add("@id_pago", idPago, dbType: DbType.Int32);
-
-        return await conn.QuerySingleOrDefaultAsync<BillingPaymentDetailDTO>(
-            "dsv.pDSV_LIC_PagoObtenerDetalle",
-            p,
-            commandType: CommandType.StoredProcedure);
-    }
 }

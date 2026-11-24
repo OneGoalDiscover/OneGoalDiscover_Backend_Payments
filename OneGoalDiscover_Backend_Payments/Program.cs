@@ -139,6 +139,9 @@ public class Program
         // Requerido para descifrar archivos .cfg de OneGoalDiscover_Utilities
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+        // Mapea columnas snake_case del SP (id_pago, created_at) a propiedades PascalCase del DTO (IdPago, CreatedAt)
+        Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
+
         app.Run();
     }
 

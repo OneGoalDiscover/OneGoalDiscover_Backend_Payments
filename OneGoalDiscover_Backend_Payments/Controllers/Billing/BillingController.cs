@@ -22,13 +22,4 @@ public class BillingController(IBillingService billingService) : ControllerBase
         return Ok(result);
     }
 
-    [HttpGet("payments/{idPago:int}")]
-    public async Task<IActionResult> GetPaymentDetail(int idPago, CancellationToken ct)
-    {
-        var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", "");
-        JwtInformationTokenDTO jwtInfo = JwtToken.jwtInformation(token);
-
-        var result = await billingService.GetPaymentDetailAsync(jwtInfo.cfg, jwtInfo.idCompany, idPago, ct);
-        return result is null ? NotFound() : Ok(result);
-    }
 }
